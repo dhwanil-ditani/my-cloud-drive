@@ -29,13 +29,14 @@ class FolderBase(SQLModel):
 
 class Folder(FolderBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    parent: int | None = Field(default=None, foreign_key="folder.id")
 
 
 class FileBase(SQLModel):
     name: str
     content_type: str
     size: int
-    parent: Folder
+    parent: int | None = Field(default=None, foreign_key="folder.id")
 
 
 class File(FileBase, table=True):
@@ -89,3 +90,27 @@ def download_file(file_id: int, session: SessionDep):
         status_code=HTTP_200_OK,
         headers={"Content-Disposition": f"attachment; filename={file.name}"},
     )
+
+
+@app.delete("/files/{file_id}")
+def delete_file(file_id: int, session: SessionDep):
+    file = session.get(File, file_id)
+    if not file:
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="File not found.")
+    session.delete()
+    session.commit()
+    return Response(
+        status_code=HTTP_200_OK,
+    )
+
+
+def list_folder():
+    pass
+
+
+def get_folder():
+    pass
+
+
+def create_folder():
+    pass
