@@ -1,5 +1,5 @@
 {
-    "window.zoomLevel": -1,
+    "window.zoomLevel": 0,
     "editor.fontSize": 24,
     "[python]": {
         "editor.defaultFormatter": "charliermarsh.ruff",
