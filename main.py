@@ -31,7 +31,7 @@ class FolderBase(SQLModel):
 class Folder(FolderBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
     parent_id: int | None = Field(default=None, foreign_key="folder.id")
-    parent: Optional["Folder"] = Relationship(back_populates="child")
+    parent: Optional["Folder"] = Relationship(back_populates="child", sa_relationship=)
     child: list["Folder"] = Relationship(back_populates="parent")
     files: list["File"] = Relationship(back_populates="parent")
 
