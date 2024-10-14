@@ -21,13 +21,21 @@ SessionDep = Annotated[Session, Depends(get_session)]
 async def lifespan(app: FastAPI):
     SQLModel.metadata.create_all(engine)
     yield
-    SQLModel.metadata.drop_all(engine)
+
+
+class FolderBase(SQLModel):
+    name: str
+
+
+class Folder(FolderBase, table=True):
+    id: int | None = Field(default=None, primary_key=True)
 
 
 class FileBase(SQLModel):
     name: str
     content_type: str
     size: int
+    parent: Folder
 
 
 class File(FileBase, table=True):
@@ -75,7 +83,9 @@ def download_file(file_id: int, session: SessionDep):
     file = session.get(File, file_id)
     if not file:
         raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="File not found.")
-    print(file.name)
     return Response(
-        content=file.data, media_type=file.content_type, status_code=HTTP_200_OK
+        content=file.data,
+        media_type=file.content_type,
+        status_code=HTTP_200_OK,
+        headers={"Content-Disposition": f"attachment; filename={file.name}"},
     )
