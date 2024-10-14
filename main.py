@@ -1,7 +1,7 @@
-from typing import Annotated
+from typing import Annotated, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Response, UploadFile
-from sqlmodel import Field, Session, SQLModel, create_engine, select
+from sqlmodel import Field, Relationship, Session, SQLModel, create_engine, select
 from starlette.status import HTTP_200_OK, HTTP_404_NOT_FOUND
 
 sqlite_file_name = "db.sqlite3"
@@ -21,6 +21,7 @@ SessionDep = Annotated[Session, Depends(get_session)]
 async def lifespan(app: FastAPI):
     SQLModel.metadata.create_all(engine)
     yield
+    # SQLModel.metadata.drop_all(engine)
 
 
 class FolderBase(SQLModel):
@@ -29,19 +30,29 @@ class FolderBase(SQLModel):
 
 class Folder(FolderBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    parent: int | None = Field(default=None, foreign_key="folder.id")
+    parent_id: int | None = Field(default=None, foreign_key="folder.id")
+    parent: Optional["Folder"] = Relationship(back_populates="child")
+    child: list["Folder"] = Relationship(back_populates="parent")
+    files: list["File"] = Relationship(back_populates="parent")
+
+
+class FolderResponse(FolderBase):
+    id: int
+    files: list["File"]
 
 
 class FileBase(SQLModel):
     name: str
     content_type: str
     size: int
-    parent: int | None = Field(default=None, foreign_key="folder.id")
+    parent_id: int | None
 
 
 class File(FileBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
     data: bytes
+    parent_id: int | None = Field(default=None, foreign_key="folder.id")
+    parent: Optional["Folder"] = Relationship(back_populates="files")
 
 
 class FileResponse(FileBase):
@@ -58,12 +69,12 @@ def list_files(session: SessionDep):
 
 
 @app.post("/files/upload", response_model=FileResponse)
-def upload_file(file: UploadFile, session: SessionDep):
+async def upload_file(file: UploadFile, session: SessionDep):
     file = File(
         name=file.filename,
         content_type=file.content_type,
         size=file.size,
-        data=file.file.read(),
+        data=await file.read(),
     )
     session.add(file)
     session.commit()
@@ -104,13 +115,38 @@ def delete_file(file_id: int, session: SessionDep):
     )
 
 
-def list_folder():
-    pass
+@app.get("/folders")
+def list_folder(session: SessionDep):
+    stmt = select(Folder)
+    return session.exec(stmt).all()
 
 
-def get_folder():
-    pass
+@app.get("/folders/{folder_id}", response_model=FolderResponse)
+def get_folder(folder_id: int, session: SessionDep):
+    folder = session.get(Folder, folder_id)
+    if not folder:
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Folder not found.")
+    return {
+        "id": folder.id,
+        "name": folder.name,
+        "files": list(
+            map(
+                lambda x: {
+                    "id": x.id,
+                    "name": x.name,
+                    "content_type": x.content_type,
+                    "size": x.size,
+                },
+                folder.files,
+            )
+        ),
+    }
 
 
-def create_folder():
-    pass
+@app.post("/folders")
+def create_folder(folder_name: str, session: SessionDep):
+    folder = Folder(name=folder_name)
+    session.add(folder)
+    session.commit()
+    session.refresh(folder)
+    return folder
