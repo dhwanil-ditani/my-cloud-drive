@@ -1,13 +1,14 @@
+from contextlib import asynccontextmanager
 from typing import Annotated, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Response, UploadFile
+from fastapi import Body, Depends, FastAPI, Form, HTTPException, Response, UploadFile
 from sqlmodel import Field, Relationship, Session, SQLModel, create_engine, select
 from starlette.status import HTTP_200_OK, HTTP_404_NOT_FOUND
 
 sqlite_file_name = "db.sqlite3"
 sqlite_url = f"sqlite:///{sqlite_file_name}"
 connect_args = {"check_same_thread": False}
-engine = create_engine(sqlite_url, connect_args=connect_args)
+engine = create_engine(sqlite_url, connect_args=connect_args, echo=True)
 
 
 def get_session():
@@ -18,6 +19,7 @@ def get_session():
 SessionDep = Annotated[Session, Depends(get_session)]
 
 
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     SQLModel.metadata.create_all(engine)
     yield
@@ -31,8 +33,10 @@ class FolderBase(SQLModel):
 class Folder(FolderBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
     parent_id: int | None = Field(default=None, foreign_key="folder.id")
-    parent: Optional["Folder"] = Relationship(back_populates="child", sa_relationship=)
-    child: list["Folder"] = Relationship(back_populates="parent")
+    parent: Optional["Folder"] = Relationship(
+        back_populates="children", sa_relationship_kwargs=dict(remote_side="Folder.id")
+    )
+    children: list["Folder"] = Relationship(back_populates="parent")
     files: list["File"] = Relationship(back_populates="parent")
 
 
@@ -62,19 +66,27 @@ class FileResponse(FileBase):
 app = FastAPI(lifespan=lifespan)
 
 
-@app.get("/files/", response_model=list[FileResponse])
+@app.get("/files", response_model=list[FileResponse])
 def list_files(session: SessionDep):
     stmt = select(File)
     return session.exec(stmt).all()
 
 
 @app.post("/files/upload", response_model=FileResponse)
-async def upload_file(file: UploadFile, session: SessionDep):
+async def upload_file(
+    file: UploadFile, folder_id: Annotated[int, Form()], session: SessionDep
+):
+    parent = session.get(Folder, folder_id)
+    if not parent:
+        raise HTTPException(
+            status_code=HTTP_404_NOT_FOUND, detail="Parent folder not found."
+        )
     file = File(
         name=file.filename,
         content_type=file.content_type,
         size=file.size,
         data=await file.read(),
+        parent_id=parent.id,
     )
     session.add(file)
     session.commit()
@@ -115,20 +127,21 @@ def delete_file(file_id: int, session: SessionDep):
     )
 
 
-@app.get("/folders")
+@app.get("/folders", response_model=list[Folder])
 def list_folder(session: SessionDep):
     stmt = select(Folder)
     return session.exec(stmt).all()
 
 
-@app.get("/folders/{folder_id}", response_model=FolderResponse)
+@app.get("/folders/{folder_id}")
 def get_folder(folder_id: int, session: SessionDep):
     folder = session.get(Folder, folder_id)
     if not folder:
         raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Folder not found.")
-    return {
+    response = {
         "id": folder.id,
         "name": folder.name,
+        "parent": [],
         "files": list(
             map(
                 lambda x: {
@@ -140,12 +153,33 @@ def get_folder(folder_id: int, session: SessionDep):
                 folder.files,
             )
         ),
+        "folders": list(
+            map(
+                lambda x: {"id": x.id, "name": x.name},
+                folder.children,
+            )
+        ),
     }
+    parent = folder.parent
+    while parent:
+        response["parent"].append({"id": parent.id, "name": parent.name})
+        parent = parent.parent
+    return response
 
 
 @app.post("/folders")
-def create_folder(folder_name: str, session: SessionDep):
-    folder = Folder(name=folder_name)
+def create_folder(
+    folder_name: Annotated[str, Body()],
+    session: SessionDep,
+    parent_id: int | None = Body(default=None),
+):
+    if parent_id is not None:
+        parent = session.get(Folder, parent_id)
+        if not parent:
+            raise HTTPException(
+                status_code=HTTP_404_NOT_FOUND, detail="Parent folder not found."
+            )
+    folder = Folder(name=folder_name, parent_id=parent_id)
     session.add(folder)
     session.commit()
     session.refresh(folder)
