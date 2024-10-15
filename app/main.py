@@ -2,7 +2,19 @@ import shutil
 from contextlib import asynccontextmanager
 from typing import Annotated, Optional
 
-from fastapi import Body, Depends, FastAPI, Form, HTTPException, Response, UploadFile
+import sqlalchemy as sa
+from fastapi import (
+    Body,
+    Depends,
+    FastAPI,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.templating import Jinja2Templates
 from sqlmodel import Field, Relationship, Session, SQLModel, create_engine, select
 from starlette import responses
 from starlette.status import (
@@ -32,7 +44,6 @@ SessionDep = Annotated[Session, Depends(get_session)]
 async def lifespan(app: FastAPI):
     SQLModel.metadata.create_all(engine)
     yield
-    SQLModel.metadata.drop_all(engine)
 
 
 class FolderBase(SQLModel):
@@ -72,6 +83,15 @@ class FileResponse(FileBase):
 
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+templates = Jinja2Templates(directory="templates")
 
 
 @app.get("/files", response_model=list[FileResponse])
@@ -82,7 +102,7 @@ def list_files(session: SessionDep):
 
 @app.post("/files/upload", response_model=FileResponse)
 async def upload_file(
-    file: UploadFile, session: SessionDep, folder_id: int | None = Form(default=0)
+    file: UploadFile, session: SessionDep, folder_id: int | None = Form(default=None)
 ):
     if folder_id is not None:
         parent = session.get(Folder, folder_id)
@@ -146,14 +166,39 @@ def delete_file(file_id: int, session: SessionDep):
     )
 
 
-@app.get("/folders", response_model=list[Folder])
-def list_folder(session: SessionDep):
-    stmt = select(Folder)
-    return session.exec(stmt).all()
+@app.get("/folders")
+def get_root_folder(request: Request, session: SessionDep):
+    stmt1 = select(File).where(File.parent_id == sa.Null())
+    stmt2 = select(Folder).where(Folder.parent_id == sa.Null())
+    response = {
+        "id": None,
+        "name": "/",
+        "parent": [],
+        "files": list(
+            map(
+                lambda x: {
+                    "id": x.id,
+                    "name": x.name,
+                    "content_type": x.content_type,
+                    "size": x.size,
+                },
+                session.exec(stmt1).all(),
+            )
+        ),
+        "folders": list(
+            map(
+                lambda x: {"id": x.id, "name": x.name},
+                session.exec(stmt2).all(),
+            )
+        ),
+    }
+    return templates.TemplateResponse(
+        request=request, name="folders.html", context=response
+    )
 
 
 @app.get("/folders/{folder_id}")
-def get_folder(folder_id: int, session: SessionDep):
+def get_folder(request: Request, folder_id: int, session: SessionDep):
     folder = session.get(Folder, folder_id)
     if not folder:
         raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Folder not found.")
@@ -183,7 +228,9 @@ def get_folder(folder_id: int, session: SessionDep):
     while parent:
         response["parent"].append({"id": parent.id, "name": parent.name})
         parent = parent.parent
-    return response
+    return templates.TemplateResponse(
+        request=request, name="folders.html", context=response
+    )
 
 
 @app.post("/folders")

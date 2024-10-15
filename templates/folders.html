@@ -1,0 +1,53 @@
+<html>
+
+<head>
+    <title>My Cloud Drive - {{name}}</title>
+    <style>
+        ul.breadcrumb {
+            padding: 10px 16px;
+            list-style: none;
+        }
+
+        ul.breadcrumb li {
+            display: inline;
+        }
+
+        ul.breadcrumb li+li:before {
+            content: "/\00a0";
+        }
+
+        ul.breadcrumb li a {
+            text-decoration: none;
+        }
+
+        ul.breadcrumb li a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+    <div>
+        <h1>My Cloud Drive</h1>
+        <ul class="breadcrumb">
+            <li><a href="/folders">Drive Root</a></li>
+            {% for item in parent %}
+            <li><a href="/folders/{{item.id}}">{{item.name}}</a></li>
+            {% endfor %}
+            {% if id %}
+            <li>{{name}}</li>
+            {% endif %}
+        </ul>
+        <h3>Files and Folders</h3>
+        <ul>
+            {% for item in folders %}
+            <li><a href="/folders/{{item.id}}">{{item.name}}</a></li>
+            {% endfor %}
+            {% for item in files %}
+            <li><a href="/files/{{item.id}}/download">{{item.name}}</a></li>
+            {% endfor %}
+        </ul>
+    </div>
+</body>
+
+</html>
