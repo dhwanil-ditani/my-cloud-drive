@@ -1,9 +1,15 @@
+import shutil
 from contextlib import asynccontextmanager
 from typing import Annotated, Optional
 
 from fastapi import Body, Depends, FastAPI, Form, HTTPException, Response, UploadFile
 from sqlmodel import Field, Relationship, Session, SQLModel, create_engine, select
-from starlette.status import HTTP_200_OK, HTTP_404_NOT_FOUND
+from starlette import responses
+from starlette.status import (
+    HTTP_200_OK,
+    HTTP_404_NOT_FOUND,
+    HTTP_500_INTERNAL_SERVER_ERROR,
+)
 
 sqlite_file_name = "db.sqlite3"
 sqlite_url = f"sqlite:///{sqlite_file_name}"
@@ -12,8 +18,11 @@ engine = create_engine(sqlite_url, connect_args=connect_args, echo=True)
 
 
 def get_session():
-    with Session(engine) as session:
+    with Session(engine, autobegin=False) as session:
+        session.begin()
         yield session
+        if session.in_transaction():
+            session.commit()
 
 
 SessionDep = Annotated[Session, Depends(get_session)]
@@ -23,7 +32,7 @@ SessionDep = Annotated[Session, Depends(get_session)]
 async def lifespan(app: FastAPI):
     SQLModel.metadata.create_all(engine)
     yield
-    # SQLModel.metadata.drop_all(engine)
+    SQLModel.metadata.drop_all(engine)
 
 
 class FolderBase(SQLModel):
@@ -54,7 +63,6 @@ class FileBase(SQLModel):
 
 class File(FileBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    data: bytes
     parent_id: int | None = Field(default=None, foreign_key="folder.id")
     parent: Optional["Folder"] = Relationship(back_populates="files")
 
@@ -74,24 +82,37 @@ def list_files(session: SessionDep):
 
 @app.post("/files/upload", response_model=FileResponse)
 async def upload_file(
-    file: UploadFile, folder_id: Annotated[int, Form()], session: SessionDep
+    file: UploadFile, session: SessionDep, folder_id: int | None = Form(default=0)
 ):
-    parent = session.get(Folder, folder_id)
-    if not parent:
-        raise HTTPException(
-            status_code=HTTP_404_NOT_FOUND, detail="Parent folder not found."
-        )
-    file = File(
+    if folder_id is not None:
+        parent = session.get(Folder, folder_id)
+        if not parent:
+            raise HTTPException(
+                status_code=HTTP_404_NOT_FOUND, detail="Parent folder not found."
+            )
+    new_file = File(
         name=file.filename,
         content_type=file.content_type,
         size=file.size,
-        data=await file.read(),
-        parent_id=parent.id,
+        parent_id=folder_id,
     )
-    session.add(file)
-    session.commit()
-    session.refresh(file)
-    return file
+    session.add(new_file)
+    session.flush()
+    session.refresh(new_file)
+    try:
+        file_path = "./data/" + str(new_file.id) + "." + new_file.name.split(".")[-1]
+        with open(file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+    except Exception as e:
+        session.rollback()
+        print(e)
+        raise HTTPException(
+            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="There was an error uploading the file",
+        )
+    finally:
+        file.file.close()
+    return new_file
 
 
 @app.get("/files/{file_id}", response_model=FileResponse)
@@ -107,11 +128,9 @@ def download_file(file_id: int, session: SessionDep):
     file = session.get(File, file_id)
     if not file:
         raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="File not found.")
-    return Response(
-        content=file.data,
-        media_type=file.content_type,
-        status_code=HTTP_200_OK,
-        headers={"Content-Disposition": f"attachment; filename={file.name}"},
+    file_path = "./data/" + str(file.id) + "." + file.name.split(".")[-1]
+    return responses.FileResponse(
+        file_path, media_type=file.content_type, filename=file.name
     )
 
 
@@ -121,7 +140,7 @@ def delete_file(file_id: int, session: SessionDep):
     if not file:
         raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="File not found.")
     session.delete()
-    session.commit()
+    session.flush()
     return Response(
         status_code=HTTP_200_OK,
     )
@@ -181,6 +200,6 @@ def create_folder(
             )
     folder = Folder(name=folder_name, parent_id=parent_id)
     session.add(folder)
-    session.commit()
+    session.flush()
     session.refresh(folder)
     return folder
