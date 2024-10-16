@@ -13,6 +13,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Field, Relationship, Session, SQLModel, create_engine, select
 from starlette import responses
@@ -20,6 +21,7 @@ from starlette.status import (
     HTTP_200_OK,
     HTTP_404_NOT_FOUND,
     HTTP_500_INTERNAL_SERVER_ERROR,
+    HTTP_303_SEE_OTHER,
 )
 
 sqlite_file_name = "db.sqlite3"
@@ -83,7 +85,6 @@ class FileResponse(FileBase):
 
 app = FastAPI(lifespan=lifespan)
 
-
 templates = Jinja2Templates(directory="templates")
 
 
@@ -95,7 +96,7 @@ def list_files(session: SessionDep):
 
 @app.post("/files/upload", response_model=FileResponse)
 async def upload_file(
-    file: UploadFile, session: SessionDep, folder_id: int | None = Form(default=None)
+        file: UploadFile, session: SessionDep, folder_id: int | None = Form(default=None)
 ):
     if folder_id is not None:
         parent = session.get(Folder, folder_id)
@@ -125,7 +126,9 @@ async def upload_file(
         )
     finally:
         file.file.close()
-    return new_file
+    return RedirectResponse(
+        "http://localhost:8000/folders", status_code=HTTP_303_SEE_OTHER
+    )
 
 
 @app.get("/files/{file_id}", response_model=FileResponse)
@@ -228,9 +231,9 @@ def get_folder(request: Request, folder_id: int, session: SessionDep):
 
 @app.post("/folders")
 def create_folder(
-    folder_name: Annotated[str, Body()],
-    session: SessionDep,
-    parent_id: int | None = Body(default=None),
+        folder_name: Annotated[str, Body()],
+        session: SessionDep,
+        parent_id: int | None = Body(default=None),
 ):
     if parent_id is not None:
         parent = session.get(Folder, parent_id)

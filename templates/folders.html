@@ -108,11 +108,11 @@
         <!-- Modal content -->
         <div class="modal-content">
             <span class="close">&times;</span>
-            <form>
+            <form id="create_folder_form">
                 <label>
                     Folder Name: <input type="text" name="folder_name">
                 </label>
-                <input type="submit" value="Create" name="submit">
+                <input id="create_folder_submit_btn" type="submit" value="Create" name="submit">
             </form>
         </div>
 
@@ -167,6 +167,35 @@
             modal.style.display = "none";
           }
         }
+
+        async function submitForm(e, form) {
+            e.preventDefault();
+            const create_folder_submit_btn = document.getElementById("create_folder_submit_btn");
+            create_folder_submit_btn.disabled = true;
+            setTimeout(() => create_folder_submit_btn.disabled = false, 2000);
+            // 2.2 Build JSON body
+            const jsonFormData = buildJsonFormData(form);
+            // 2.3 Build Headers
+            // 2.4 Request & Response
+            await fetch("/folders", {method: "POST", body: JSON.stringify(jsonFormData), headers: { "Content-Type": "application/json"}})
+            location.reload();
+        }
+
+        function buildJsonFormData(form) {
+            const jsonFormData = { };
+            for(const pair of new FormData(form)) {
+                jsonFormData[pair[0]] = pair[1];
+            }
+            return jsonFormData;
+        }
+
+        const create_folder_form = document.querySelector("#create_folder_form");
+        if(create_folder_form) {
+            create_folder_form.addEventListener("submit", function(e) {
+                submitForm(e, this);
+            });
+        }
+
     </script>
 </body>
 
