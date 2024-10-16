@@ -84,7 +84,7 @@
         </div>
         <ul class="breadcrumb">
             <li><a href="/folders">Drive Root</a></li>
-            {% for item in parent %}
+            {% for item in parent[::-1] %}
             <li><a href="/folders/{{item.id}}">{{item.name}}</a></li>
             {% endfor %}
             {% if id %}
@@ -125,6 +125,7 @@
             <span class="close">&times;</span>
             <form method="post" enctype="multipart/form-data" action="/files/upload">
                 <input type="file" name="file">
+                <input id="upload_folder_id" type="text" hidden name="folder_id">
                 <input type="submit" value="Upload" name="submit">
             </form>
         </div>
@@ -175,10 +176,31 @@
             setTimeout(() => create_folder_submit_btn.disabled = false, 2000);
             // 2.2 Build JSON body
             const jsonFormData = buildJsonFormData(form);
+            
+            const parent_id = getCookie('parent_id');
+            if (parent_id != "") {
+                jsonFormData.parent_id = parent_id;
+            }
             // 2.3 Build Headers
             // 2.4 Request & Response
             await fetch("/folders", {method: "POST", body: JSON.stringify(jsonFormData), headers: { "Content-Type": "application/json"}})
             location.reload();
+        }
+
+        function getCookie(cname) {
+            let name = cname + "=";
+            let decodedCookie = decodeURIComponent(document.cookie);
+            let ca = decodedCookie.split(';');
+            for(let i = 0; i <ca.length; i++) {
+                let c = ca[i];
+                while (c.charAt(0) == ' ') {
+                    c = c.substring(1);
+                }
+                if (c.indexOf(name) == 0) {
+                    return c.substring(name.length, c.length);
+                }
+            }
+            return "";
         }
 
         function buildJsonFormData(form) {
@@ -196,6 +218,10 @@
             });
         }
 
+        const parent_id = getCookie('parent_id');
+        if (parent_id != "") {
+            document.getElementById("upload_folder_id").setAttribute("value", parent_id)
+        }
     </script>
 </body>
 

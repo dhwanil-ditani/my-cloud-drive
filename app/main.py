@@ -19,9 +19,9 @@ from sqlmodel import Field, Relationship, Session, SQLModel, create_engine, sele
 from starlette import responses
 from starlette.status import (
     HTTP_200_OK,
+    HTTP_303_SEE_OTHER,
     HTTP_404_NOT_FOUND,
     HTTP_500_INTERNAL_SERVER_ERROR,
-    HTTP_303_SEE_OTHER,
 )
 
 sqlite_file_name = "db.sqlite3"
@@ -96,7 +96,7 @@ def list_files(session: SessionDep):
 
 @app.post("/files/upload", response_model=FileResponse)
 async def upload_file(
-        file: UploadFile, session: SessionDep, folder_id: int | None = Form(default=None)
+    file: UploadFile, session: SessionDep, folder_id: int | None = Form(default=None)
 ):
     if folder_id is not None:
         parent = session.get(Folder, folder_id)
@@ -188,9 +188,11 @@ def get_root_folder(request: Request, session: SessionDep):
             )
         ),
     }
-    return templates.TemplateResponse(
+    template_response = templates.TemplateResponse(
         request=request, name="folders.html", context=response
     )
+    template_response.delete_cookie("parent_id")
+    return template_response
 
 
 @app.get("/folders/{folder_id}")
@@ -224,16 +226,18 @@ def get_folder(request: Request, folder_id: int, session: SessionDep):
     while parent:
         response["parent"].append({"id": parent.id, "name": parent.name})
         parent = parent.parent
-    return templates.TemplateResponse(
+    template_response = templates.TemplateResponse(
         request=request, name="folders.html", context=response
     )
+    template_response.set_cookie("parent_id", response["id"])
+    return template_response
 
 
 @app.post("/folders")
 def create_folder(
-        folder_name: Annotated[str, Body()],
-        session: SessionDep,
-        parent_id: int | None = Body(default=None),
+    folder_name: Annotated[str, Body()],
+    session: SessionDep,
+    parent_id: int | None = Body(default=None),
 ):
     if parent_id is not None:
         parent = session.get(Folder, parent_id)
