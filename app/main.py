@@ -13,7 +13,6 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Field, Relationship, Session, SQLModel, create_engine, select
 from starlette import responses
@@ -83,13 +82,7 @@ class FileResponse(FileBase):
 
 
 app = FastAPI(lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
 
 templates = Jinja2Templates(directory="templates")
 
